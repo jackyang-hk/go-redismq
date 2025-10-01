@@ -2,14 +2,14 @@ package go_redismq
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strconv"
+	"time"
+
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/redis/go-redis/v9"
-	"strconv"
-	"time"
 )
 
 const (
@@ -19,14 +19,20 @@ const (
 func StartDelayBackgroundThread() {
 	go func() {
 		for {
-			defer func() {
-				if exception := recover(); exception != nil {
-					fmt.Printf("Redismq polligCore panic error:%s\n", exception)
-					return
-				}
-			}()
+			startDelayBackgroundThreadIteration()
+
 			polling()
 			time.Sleep(10 * time.Second)
+		}
+	}()
+}
+
+func startDelayBackgroundThreadIteration() {
+	defer func() {
+		if exception := recover(); exception != nil {
+			fmt.Printf("Redismq polligCore panic error:%s\n", exception)
+
+			return
 		}
 	}()
 }
@@ -45,6 +51,7 @@ func polling() {
 	if err != nil {
 		return
 	}
+
 	for _, key := range result {
 		pollingCore(key)
 	}
@@ -54,6 +61,7 @@ func pollingCore(key string) {
 	defer func() {
 		if exception := recover(); exception != nil {
 			fmt.Printf("RedisMq polligCore panic error:%s\n", exception)
+
 			return
 		}
 	}()
@@ -66,7 +74,9 @@ func pollingCore(key string) {
 			fmt.Printf("RedisMq polligCore error:%s\n", err.Error())
 		}
 	}(client)
+
 	ctx := context.Background()
+
 	result, err := client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
 		Min:    "0",
 		Max:    strconv.FormatInt(gtime.Now().Timestamp(), 10),
@@ -76,21 +86,28 @@ func pollingCore(key string) {
 	if err != nil {
 		return
 	}
+
 	if len(result) == 0 {
 		g.Log().Debugf(ctx, "RedisMq Delay Queue:%s No Queue\n", MqDelayQueueName)
+
 		return
 	}
+
 	for _, messageJson := range result {
 		var message *Message
+
 		err = gjson.Unmarshal([]byte(messageJson), &message)
 		if err != nil {
 			fmt.Printf("RedisMq Unmarshal Message Error:[%v]\n", err)
+
 			continue
 		}
+
 		err = client.ZRem(ctx, key, messageJson).Err()
 		if err == nil {
 			message.StartDeliverTime = 0
 			message.MessageId = ""
+
 			send, sendErr := sendMessage(message, "DelayQueue")
 			if sendErr != nil {
 				g.Log().Errorf(ctx, "RedisMq Delete From Delay Queue,And Send[%v], sendErr:%s\n", send, sendErr.Error())
@@ -112,19 +129,22 @@ func SendDelay(message *Message, delay int64) (bool, error) {
 			fmt.Printf("RedisMq SendDelay error:%s \n", err.Error())
 		}
 	}(client)
+
 	messageJson, err := gjson.Marshal(message)
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("RedisMq SendDelay exception:%s message:%v\n", err.Error(), message))
+		return false, fmt.Errorf("RedisMq SendDelay exception:%s message:%v", err.Error(), message)
 	}
+
 	jsonString := string(messageJson)
 	score := gtime.Now().Timestamp() + delay
+
 	_, err = client.ZAdd(context.Background(), MqDelayQueueName, redis.Z{
 		Score:  float64(score),
 		Member: jsonString,
 	}).Result()
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("SendDelay exception:%s message:%v\n", err.Error(), message))
+		return false, fmt.Errorf("SendDelay exception:%s message:%v", err.Error(), message)
 	}
-	//fmt.Printf("RedisMq Push To Deplay Queue,Name[%s],Task[%s],Score[%d],Result[%v]\n", MqDelayQueueName, messageJson, score, result)
+
 	return true, nil
 }

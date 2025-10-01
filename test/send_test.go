@@ -2,11 +2,13 @@ package test
 
 import (
 	"context"
-	"github.com/gogf/gf/v2/frame/g"
-	goredismq "github.com/jackyang-hk/go-redismq"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
+	goredismq "github.com/jackyang-hk/go-redismq"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var receiveCount = 0
@@ -25,6 +27,7 @@ func (t TestListener) GetTag() string {
 func (t TestListener) Consume(ctx context.Context, message *goredismq.Message) goredismq.Action {
 	receiveCount = receiveCount + 1
 	g.Log().Infof(ctx, "Receive Message %d:%s", receiveCount, goredismq.MarshalToJsonString(message))
+
 	return goredismq.CommitMessage
 }
 
@@ -45,13 +48,13 @@ func TestProducerAndConsumer(t *testing.T) {
 					Tag:   "test",
 					Body:  "Test",
 				})
-				require.Nil(t, err, "error")
-				require.Equal(t, result, true)
+				assert.NoError(t, err, "error")
+				assert.True(t, result)
 				time.Sleep(1 * time.Second)
 			}
 		}()
 
 		time.Sleep(5 * time.Second)
-		require.Equal(t, receiveCount > 0, true)
+		require.Positive(t, receiveCount)
 	})
 }

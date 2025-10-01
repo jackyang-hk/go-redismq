@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	goredismq "github.com/jackyang-hk/go-redismq"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	goredismq "github.com/jackyang-hk/go-redismq"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMethodInvoke(t *testing.T) {
@@ -19,17 +20,20 @@ func TestMethodInvoke(t *testing.T) {
 	})
 	goredismq.RegisterListener(&TestListener{})
 	goredismq.StartRedisMqConsumer()
+
 	ctx := context.Background()
 	goredismq.RegisterInvoke("TestInvoke", func(ctx context.Context, request interface{}) (response interface{}, err error) {
-		if request == "error" {
+		switch request {
+		case "error":
 			return nil, errors.New("error")
-		} else if request == "panic" {
+		case "panic":
 			panic("panic")
-		} else if request == "timeout" {
+		case "timeout":
 			time.Sleep(30 * time.Second)
+
 			return nil, errors.New("timeout")
-		} else {
-			return fmt.Sprintf("%s:TestResponse", goredismq.MarshalToJsonString(request)), nil
+		default:
+			return goredismq.MarshalToJsonString(request) + ":TestResponse", nil
 		}
 	})
 	time.Sleep(5 * time.Second)
@@ -40,9 +44,8 @@ func TestMethodInvoke(t *testing.T) {
 			Request: 1,
 		}, 0)
 		require.NotNil(t, res)
-		require.Equal(t, res.Status, true)
+		require.True(t, res.Status)
 		fmt.Printf("TestRequest:%s\n", goredismq.MarshalToJsonString(res))
-
 	})
 	t.Run("Test Method Invoke Error", func(t *testing.T) {
 		res := goredismq.Invoke(ctx, &goredismq.InvoiceRequest{
@@ -51,7 +54,7 @@ func TestMethodInvoke(t *testing.T) {
 			Request: "error",
 		}, 0)
 		require.NotNil(t, res)
-		require.Equal(t, res.Status, false)
+		require.False(t, res.Status)
 		fmt.Printf("TestErrorRequest:%s\n", goredismq.MarshalToJsonString(res))
 	})
 	t.Run("Test Method Invoke Panic", func(t *testing.T) {
@@ -61,7 +64,7 @@ func TestMethodInvoke(t *testing.T) {
 			Request: "panic",
 		}, 0)
 		require.NotNil(t, res)
-		require.Equal(t, res.Status, false)
+		require.False(t, res.Status)
 		fmt.Printf("TestPanicRequest:%s\n", goredismq.MarshalToJsonString(res))
 	})
 	t.Run("Test Method Invoke Timeout", func(t *testing.T) {
@@ -71,7 +74,7 @@ func TestMethodInvoke(t *testing.T) {
 			Request: "timeout",
 		}, 0)
 		require.NotNil(t, res)
-		require.Equal(t, res.Status, false)
+		require.False(t, res.Status)
 		fmt.Printf("TestTimeOutRequest:%s\n", goredismq.MarshalToJsonString(res))
 	})
 }
