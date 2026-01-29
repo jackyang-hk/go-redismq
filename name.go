@@ -3,8 +3,9 @@ package go_redismq
 import (
 	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
-import "github.com/google/uuid"
 
 const (
 	REDIS_MQ_QUEUE_KEY_PREFIX            = "MQ_QUEUE_LIST_"
@@ -26,6 +27,7 @@ func getBackupQueueName(topic string) string {
 
 func GenerateUniqueNo(districtCode string) string {
 	uuid := uuid.New()
+
 	return fmt.Sprintf("MQCT_%s_%s", districtCode, strings.Replace(uuid.String(), "-", "", -1))
 }
 

@@ -24,10 +24,12 @@ func CurrentTimeMillis() (s int64) {
 func GenerateRandomAlphanumeric(length int) string {
 	//rand.Seed(time.Now().UnixNano())
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
 	result := make([]byte, length)
 	for i := range result {
 		result[i] = charset[rand.Intn(len(charset))]
 	}
+
 	return string(result)
 }
 
@@ -44,6 +46,7 @@ func GenerateRandomCode(length int) string {
 	for i := range b {
 		b[i] = charset[seededRand.Intn(len(charset))]
 	}
+
 	return string(b)
 }
 
