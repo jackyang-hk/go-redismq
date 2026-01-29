@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/glog"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -29,18 +27,18 @@ func listenForResponse(ctx context.Context, req *InvoiceRequest, responseChan ch
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream Closs Redis Stream Client error:%s\n", err.Error())
+			logger.Errorf("MQStream Closs Redis Stream Client error:%s", err.Error())
 		}
 	}(client)
 
 	replyChannel := getReplyChannel(req)
-	g.Log().Debugf(ctx, "MethodInvoke waiting for replyChannel:%s", replyChannel)
+	logger.Debugf("MethodInvoke waiting for replyChannel:%s", replyChannel)
 
 	pubSub := client.Subscribe(ctx, replyChannel)
 	defer func(pubSub *redis.PubSub) {
 		err := pubSub.Close()
 		if err != nil {
-			g.Log().Errorf(ctx, "Error pubSub: %s\n", err.Error())
+			logger.Errorf("Error pubSub: %s", err.Error())
 		}
 	}(pubSub)
 
@@ -50,7 +48,7 @@ func listenForResponse(ctx context.Context, req *InvoiceRequest, responseChan ch
 		select {
 		case msg, ok := <-ch:
 			if !ok {
-				g.Log().Infof(ctx, "listenForResponse channel closed")
+				logger.Infof("listenForResponse channel closed")
 
 				return
 			}
@@ -59,18 +57,18 @@ func listenForResponse(ctx context.Context, req *InvoiceRequest, responseChan ch
 
 			err := json.Unmarshal([]byte(msg.Payload), &res)
 			if err != nil {
-				g.Log().Errorf(ctx, "Error deserializing response: %s\n", err.Error())
+				logger.Errorf("Error deserializing response: %s", err.Error())
 
 				return
 			}
 
-			g.Log().Debugf(ctx, "MethodInvoke get response:%s replyChannel:%s", MarshalToJsonString(res), replyChannel)
+			logger.Debugf("MethodInvoke get response:%s replyChannel:%s", MarshalToJsonString(res), replyChannel)
 
 			responseChan <- res
 
 			return
 		case <-ctx.Done():
-			g.Log().Infof(ctx, "listenForResponse timeout or cancelled")
+			logger.Infof("listenForResponse timeout or cancelled")
 
 			return
 		}
@@ -93,7 +91,7 @@ func Invoke(ctx context.Context, req *InvoiceRequest, timeoutSeconds int) *Invoi
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream Closs Redis Stream Client error:%s\n", err.Error())
+			logger.Errorf("MQStream Closs Redis Stream Client error:%s", err.Error())
 		}
 	}(client)
 
@@ -132,7 +130,7 @@ func Invoke(ctx context.Context, req *InvoiceRequest, timeoutSeconds int) *Invoi
 		}
 	}
 
-	glog.Infof(ctx, "RedisMQ:Measure:Invoke After Send Message cost：%s \n", time.Since(startTime))
+	logger.Infof("RedisMQ:Measure:Invoke After Send Message cost：%s", time.Since(startTime))
 
 	go func() {
 		time.Sleep(time.Duration(timeoutSeconds) * time.Second)
@@ -149,14 +147,14 @@ func Invoke(ctx context.Context, req *InvoiceRequest, timeoutSeconds int) *Invoi
 
 	select {
 	case <-ctx.Done():
-		glog.Infof(ctx, "RedisMQ:Measure:Invoke cost：%s \n", time.Since(startTime))
+		logger.Infof("RedisMQ:Measure:Invoke cost：%s", time.Since(startTime))
 
 		return &InvoiceResponse{
 			Status:   false,
 			Response: "Invoke context timeout",
 		}
 	case response := <-responseChan:
-		glog.Infof(ctx, "RedisMQ:Measure:Invoke cost：%s \n", time.Since(startTime))
+		logger.Infof("RedisMQ:Measure:Invoke cost：%s", time.Since(startTime))
 
 		return response
 	}

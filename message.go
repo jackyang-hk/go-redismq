@@ -1,7 +1,6 @@
 package go_redismq
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/encoding/gjson"
@@ -121,7 +120,7 @@ func (message *Message) passStreamMessage(value map[string]interface{}) {
 		if err == nil {
 			defer func() {
 				if exception := recover(); exception != nil {
-					fmt.Printf("Redismq passStreamMessage panic error:%s\n", exception)
+					logger.Errorf("Redismq passStreamMessage panic error:%s", exception)
 
 					return
 				}

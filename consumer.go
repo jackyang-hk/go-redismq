@@ -2,7 +2,6 @@ package go_redismq
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/redis/go-redis/v9"
 )
@@ -22,21 +20,21 @@ func StartRedisMqConsumer() {
 		innerSettingConsumerName()
 
 		if len(consumerName) == 0 {
-			fmt.Println("MQStream StartRedisMqConsumer Failed While ConsumerName Invalid")
+			logger.Errorf("MQStream StartRedisMqConsumer Failed While ConsumerName Invalid")
 
 			return
 		}
 
 		StartDelayBackgroundThread()
-		fmt.Println("MQStream Start Delay Queue!")
+		logger.Infof("MQStream Start Delay Queue!")
 
 		deathQueueName := GetDeathQueueName()
 		createStreamGroup(deathQueueName, "death_message")
-		fmt.Printf("MQStream Init Death Queue deathQueueName:%s", deathQueueName)
+		logger.Infof("MQStream Init Death Queue deathQueueName:%s", deathQueueName)
 		innerLoadConsumer()
-		fmt.Println("MQStream Finish Default MQ Subscribe!")
+		logger.Infof("MQStream Finish Default MQ Subscribe!")
 		startScheduleTrimStream()
-		fmt.Println("MQStream Finish Queue Length Cut!")
+		logger.Infof("MQStream Finish Queue Length Cut!")
 	}()
 	go keepAliveMessageInvokeListener()
 }
@@ -45,7 +43,7 @@ func innerSettingConsumerName() {
 	// Check IP Interfaces
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		fmt.Printf("Error:%s\n", err.Error())
+		logger.Errorf("Error:%s", err.Error())
 
 		return
 	}
@@ -57,7 +55,7 @@ func innerSettingConsumerName() {
 			// Get ALL Addr
 			addrList, err := face.Addrs()
 			if err != nil {
-				fmt.Printf("Error:%s\n", err.Error())
+				logger.Errorf("Error:%s", err.Error())
 
 				continue
 			}
@@ -67,14 +65,14 @@ func innerSettingConsumerName() {
 				// change to IPV4
 				ip, _, err := net.ParseCIDR(one.String())
 				if err != nil {
-					fmt.Printf("Error:%s\n", err.Error())
+					logger.Errorf("Error:%s", err.Error())
 
 					continue
 				}
 
 				// Check IPv4 Addr
 				if ip.To4() != nil {
-					fmt.Printf("IPv4 Address: %s\n", ip)
+					logger.Infof("IPv4 Address: %s", ip)
 					consumerName = ip.String()
 				}
 			}
@@ -90,7 +88,7 @@ func createStreamGroup(queueName string, topic string) {
 func tryCreateGroup(queueName string, topic string) {
 	defer func() {
 		if exception := recover(); exception != nil {
-			fmt.Printf("MQStream Init TryCreateGroup panic error:%s\n", exception)
+			logger.Errorf("MQStream Init TryCreateGroup panic error:%s", exception)
 
 			return
 		}
@@ -101,7 +99,7 @@ func tryCreateGroup(queueName string, topic string) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream sendMessage error:%s\n", err.Error())
+			logger.Errorf("MQStream sendMessage error:%s", err.Error())
 		}
 	}(client)
 
@@ -113,7 +111,7 @@ func tryCreateGroup(queueName string, topic string) {
 	// Sent Test Stream Message
 	_, err := client.XAdd(context.Background(), message.toStreamAddArgsValues(queueName)).Result()
 	if err != nil {
-		fmt.Printf("MQStream Setup Group Failure Or Group Exsit exception:%s queueName:%s group:%s\n", err, queueName, Group)
+		logger.Warnf("MQStream Setup Group Failure Or Group Exsit exception:%s queueName:%s group:%s", err, queueName, Group)
 	}
 
 	found := false
@@ -129,11 +127,11 @@ func tryCreateGroup(queueName string, topic string) {
 		// Try To Create Group
 		// Create Consumer Group
 		if err := client.XGroupCreateMkStream(context.Background(), queueName, Group, "$").Err(); err != nil {
-			fmt.Printf("MQStream Group exsit queueName:%s groupId:%s err:%s \n", queueName, Group, err.Error())
+			logger.Warnf("MQStream Group exsit queueName:%s groupId:%s err:%s", queueName, Group, err.Error())
 
 			return
 		} else {
-			fmt.Printf("MQStream init queueName:%s groupId:%s \n", queueName, Group)
+			logger.Infof("MQStream init queueName:%s groupId:%s", queueName, Group)
 		}
 	}
 }
@@ -141,7 +139,7 @@ func tryCreateGroup(queueName string, topic string) {
 func tryCreateConsumer(queueName string) {
 	defer func() {
 		if exception := recover(); exception != nil {
-			fmt.Printf("MQStream init queue tryCreateConsumer panic error:%s\n", exception)
+			logger.Errorf("MQStream init queue tryCreateConsumer panic error:%s", exception)
 
 			return
 		}
@@ -152,14 +150,14 @@ func tryCreateConsumer(queueName string) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream sendMessage error:%s\n", err.Error())
+			logger.Errorf("MQStream sendMessage error:%s", err.Error())
 		}
 	}(client)
 
 	if _, err := client.XGroupCreateConsumer(context.Background(), queueName, Group, consumerName).Result(); err != nil {
-		fmt.Printf("MQStream consumerName failure or consumerName exsit queueName:%s groupId:%s consumerName:%s err:%s\n", queueName, Group, consumerName, err.Error())
+		logger.Warnf("MQStream consumerName failure or consumerName exsit queueName:%s groupId:%s consumerName:%s err:%s", queueName, Group, consumerName, err.Error())
 	} else {
-		fmt.Printf("MQStream init queueName:%s groupId:%s consumerName:%s\n", queueName, Group, consumerName)
+		logger.Infof("MQStream init queueName:%s groupId:%s consumerName:%s", queueName, Group, consumerName)
 	}
 }
 
@@ -183,7 +181,7 @@ func loopConsumer(topic string) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream Closs Redis Stream Client error:%s\n", err.Error())
+			logger.Errorf("MQStream Closs Redis Stream Client error:%s", err.Error())
 		}
 	}(client)
 
@@ -203,7 +201,7 @@ func customerIteration(client *redis.Client, topic string) {
 				err = gerror.NewCodef(gcode.CodeInternalPanic, "%+v", exception)
 			}
 
-			fmt.Printf("MQStream Stream loopConsumer Redis Error topic:%s panic error:%s\n", topic, err.Error())
+			logger.Errorf("MQStream Stream loopConsumer Redis Error topic:%s panic error:%s", topic, err.Error())
 		}
 	}()
 
@@ -215,7 +213,7 @@ func customerIteration(client *redis.Client, topic string) {
 			runConsumeMessage(consumer, message)
 			//todo mark use group get message , should drop message which has no consumer
 		} else {
-			fmt.Printf("MQStream Stream Receive Group:{} No Comsumer Drop message::%v\n", message)
+			logger.Warnf("MQStream Stream Receive Group:{} No Comsumer Drop message::%v", message)
 			messageAck(message)
 		}
 
@@ -236,7 +234,7 @@ func loopTransactionChecker(topic string) {
 func loopTransactionCheckerIteration(topic string) {
 	defer func() {
 		if exception := recover(); exception != nil {
-			fmt.Printf("RedisMQ_Query Stream Message Query Transaction Pre Redis Error loopTransactionChecker topic:%s panic error:%s\n", topic, exception)
+			logger.Errorf("RedisMQ_Query Stream Message Query Transaction Pre Redis Error loopTransactionChecker topic:%s panic error:%s", topic, exception)
 
 			return
 		}
@@ -290,7 +288,7 @@ func runConsumeMessage(consumer IMessageListener, message *Message) {
 				err = gerror.NewCodef(gcode.CodeInternalPanic, "%+v", exception)
 			}
 
-			fmt.Printf("RedisMQ Stream Message runConsumeMessage panic error:%s\n", err.Error())
+			logger.Errorf("RedisMQ Stream Message runConsumeMessage panic error:%s", err.Error())
 
 			return
 		}
@@ -298,7 +296,7 @@ func runConsumeMessage(consumer IMessageListener, message *Message) {
 
 	if message.isBoardCastingMessage() {
 		// todo mark it's a bug
-		fmt.Printf("RedisMQ_Receive Stream Message Exception Group Receive Broadcast, Drop messageKey:%s messageId:%v\n", GetMessageKey(message.Topic, message.Tag), message.MessageId)
+		logger.Warnf("RedisMQ_Receive Stream Message Exception Group Receive Broadcast, Drop messageKey:%s messageId:%v", GetMessageKey(message.Topic, message.Tag), message.MessageId)
 
 		return
 	}
@@ -309,7 +307,7 @@ func runConsumeMessage(consumer IMessageListener, message *Message) {
 		// history no expire time
 		if (CurrentTimeMillis() - message.SendTime) > 1000*60*60*24*3 {
 			//message should expire after 3 days, drop
-			fmt.Printf("RedisMQ_Receive Stream Message Exception After 3 Days Drop Expired messageKey:%s messageId:%v\n ", GetMessageKey(message.Topic, message.Tag), message.MessageId)
+			logger.Warnf("RedisMQ_Receive Stream Message Exception After 3 Days Drop Expired messageKey:%s messageId:%v", GetMessageKey(message.Topic, message.Tag), message.MessageId)
 
 			return
 		}
@@ -323,7 +321,7 @@ func runConsumeMessage(consumer IMessageListener, message *Message) {
 		defer func() {
 			if exception := recover(); exception != nil {
 				// todo mark print exception stack
-				fmt.Printf("RedisMQ_Receive Stream Message Error  messageKey:%s messageId:%v panic error:%s\n", GetMessageKey(message.Topic, message.Tag), message.MessageId, exception)
+				logger.Errorf("RedisMQ_Receive Stream Message Error  messageKey:%s messageId:%v panic error:%s", GetMessageKey(message.Topic, message.Tag), message.MessageId, exception)
 
 				if pushTaskToResumeLater(message) {
 					messageAck(message)
@@ -348,7 +346,7 @@ func runConsumeMessage(consumer IMessageListener, message *Message) {
 		}
 
 		action := consumer.Consume(ctx, message)
-		fmt.Printf("RedisMQ_Receive Stream Message Consume messageKey:%s result:%d messageId:%v cost:%dms\n", GetMessageKey(message.Topic, message.Tag), action, message.MessageId, cost)
+		logger.Infof("RedisMQ_Receive Stream Message Consume messageKey:%s result:%d messageId:%v cost:%dms", GetMessageKey(message.Topic, message.Tag), action, message.MessageId, cost)
 
 		if action == ReconsumeLater {
 			if pushTaskToResumeLater(message) {
@@ -365,8 +363,6 @@ func runConsumeMessage(consumer IMessageListener, message *Message) {
 func messageAck(message *Message) {
 	var err error
 
-	ctx := context.Background()
-
 	defer func() {
 		if exception := recover(); exception != nil {
 			if v, ok := exception.(error); ok && gerror.HasStack(v) {
@@ -375,7 +371,7 @@ func messageAck(message *Message) {
 				err = gerror.NewCodef(gcode.CodeInternalPanic, "%+v", exception)
 			}
 
-			g.Log().Errorf(ctx, "MQStream MessageAck panic error:%s\n", err.Error())
+			logger.Errorf("MQStream MessageAck panic error:%s", err.Error())
 
 			return
 		}
@@ -386,7 +382,7 @@ func messageAck(message *Message) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream sendMessage error:%s\n", err.Error())
+			logger.Errorf("MQStream sendMessage error:%s", err.Error())
 		}
 	}(client)
 
@@ -394,12 +390,12 @@ func messageAck(message *Message) {
 
 	ackResult, err := client.XAck(context.Background(), streamName, Group, message.MessageId).Result()
 	if err != nil {
-		fmt.Printf("MQStream ack message:%v panic error:%s\n", message, err)
+		logger.Errorf("MQStream ack message:%v panic error:%s", message, err)
 
 		return
 	}
 
-	g.Log().Infof(ctx, "MQStream ack streamMessageId:%s streamName:%s ackResult:%d\n", message.MessageId, streamName, ackResult)
+	logger.Infof("MQStream ack streamMessageId:%s streamName:%s ackResult:%d", message.MessageId, streamName, ackResult)
 }
 
 func blockReceiveConsumerMessage(client *redis.Client, topic string) *Message {
@@ -415,14 +411,14 @@ func blockReceiveConsumerMessage(client *redis.Client, topic string) *Message {
 				err = gerror.NewCodef(gcode.CodeInternalPanic, "%+v", exception)
 			}
 
-			g.Log().Errorf(ctx, "MQStream blockReceiveConsumerMessage topic:%s panic error:%v %v\n", topic, err.Error(), exception)
+			logger.Errorf("MQStream blockReceiveConsumerMessage topic:%s panic error:%v %v", topic, err.Error(), exception)
 
 			return
 		}
 	}()
 
 	streamName := GetQueueName(topic)
-	//fmt.Printf("MQStream XReadGroup blockReceiveConsumerMessage streamName=%s\n", streamName)
+	//logger.Debug("MQStream XReadGroup blockReceiveConsumerMessage streamName=%s", streamName)
 	result, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    Group,
 		Consumer: consumerName,
@@ -432,7 +428,7 @@ func blockReceiveConsumerMessage(client *redis.Client, topic string) *Message {
 		NoAck:    true,
 	}).Result()
 	if err != nil {
-		g.Log().Debugf(ctx, "MQStream blockReceiveConsumerMessage streamName=%s err=%s\n", streamName, err.Error())
+		logger.Debugf("MQStream blockReceiveConsumerMessage streamName=%s err=%s", streamName, err.Error())
 
 		return nil
 	}
@@ -453,7 +449,7 @@ func blockReceiveConsumerMessage(client *redis.Client, topic string) *Message {
 
 func pushTaskToResumeLater(message *Message) bool {
 	ResumeTimesMax := MaxInt(40, message.ReconsumeMax)
-	fmt.Printf("RedisMq_pushTaskToResumeLater messageId:%s, topic:%s tag:%s ResumeTimesMax:%v/%v \n", message.MessageId, message.Topic, message.Tag, message.ReconsumeTimes, ResumeTimesMax)
+	logger.Infof("RedisMq_pushTaskToResumeLater messageId:%s, topic:%s tag:%s ResumeTimesMax:%v/%v", message.MessageId, message.Topic, message.Tag, message.ReconsumeTimes, ResumeTimesMax)
 
 	if message.ReconsumeTimes >= ResumeTimesMax {
 		return putMessageToDeathQueue(message)
@@ -473,18 +469,18 @@ func putMessageToDeathQueue(message *Message) bool {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("sendMessage error:%s\n", err)
+			logger.Errorf("sendMessage error:%s", err)
 		}
 	}(client)
 
 	streamMessageId, err := client.XAdd(context.Background(), message.toStreamAddArgsValues(GetDeathQueueName())).Result()
 	if err != nil {
-		fmt.Printf("MQStream push message to death error:%s messageId:%s", err.Error(), message.MessageId)
+		logger.Errorf("MQStream push message to death error:%s messageId:%s", err.Error(), message.MessageId)
 
 		return false
 	}
 
-	fmt.Printf("MQStream push message to death, messageId=%s deathMessageId:%s", message.MessageId, streamMessageId)
+	logger.Infof("MQStream push message to death, messageId=%s deathMessageId:%s", message.MessageId, streamMessageId)
 
 	return true
 }
@@ -494,7 +490,7 @@ func putMessageToTransactionDeathQueue(topic string, message *Message) bool {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream push transaction message to death error:%s\n", err.Error())
+			logger.Errorf("MQStream push transaction message to death error:%s", err.Error())
 		}
 	}(client)
 
@@ -505,7 +501,7 @@ func putMessageToTransactionDeathQueue(topic string, message *Message) bool {
 		return nil
 	})
 	if err != nil {
-		fmt.Printf("MQStream transaction message to death and delete exception:%s message:%v\n", err, message)
+		logger.Errorf("MQStream transaction message to death and delete exception:%s message:%v", err, message)
 
 		return false
 	}
@@ -518,7 +514,7 @@ func fetchTransactionPrepareMessagesForChecker(topic string) []*Message {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQ redis error:%s\n", err.Error())
+			logger.Errorf("MQ redis error:%s", err.Error())
 		}
 	}(client)
 
@@ -540,7 +536,7 @@ func fetchTransactionPrepareMessagesForChecker(topic string) []*Message {
 					messages = append(messages, message)
 				}
 			} else {
-				fmt.Printf("MQStream transaction pre message messageId:%s\n", messageId)
+				logger.Warnf("MQStream transaction pre message messageId:%s", messageId)
 			}
 		}
 	}
@@ -554,7 +550,7 @@ func startScheduleTrimStream() {
 		defer func(client *redis.Client) {
 			err := client.Close()
 			if err != nil {
-				fmt.Printf("MQStream redis error:%s\n", err.Error())
+				logger.Errorf("MQStream redis error:%s", err.Error())
 			}
 		}(client)
 
@@ -571,7 +567,7 @@ func startScheduleTrimStreamIteration(client *redis.Client) {
 
 	defer func() {
 		if exception := recover(); exception != nil {
-			fmt.Printf("MQStream startScheduleTrimStream exception:%s\n", exception)
+			logger.Errorf("MQStream startScheduleTrimStream exception:%s", exception)
 
 			return
 		}
