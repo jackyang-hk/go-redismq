@@ -102,19 +102,27 @@ func getReplyChannel(req *InvoiceRequest) string {
 
 func init() {
 	RegisterListener(&MessageInvokeListener{})
-	logger.Infof("MessageInvokeListener RegisterListener")
+	if logger != nil {
+		logger.Infof("MessageInvokeListener RegisterListener")
+	}
 }
 
 var invokeMap = make(map[string]func(ctx context.Context, request interface{}) (response interface{}, err error))
 
 func RegisterInvoke(methodName string, op func(ctx context.Context, request interface{}) (response interface{}, err error)) {
 	if len(methodName) <= 0 || op == nil {
-		logger.Errorf("MQStream RegisterInvoke error methodName:%s or op:%p is nil", methodName, op)
+		if logger != nil {
+			logger.Errorf("MQStream RegisterInvoke error methodName:%s or op:%p is nil", methodName, op)
+		}
 	} else if _, ok := invokeMap[methodName]; ok {
-		logger.Warnf("MQStream RegisterInvoke error exist Old One:%s for op:%p", methodName, op)
+		if logger != nil {
+			logger.Warnf("MQStream RegisterInvoke error exist Old One:%s for op:%p", methodName, op)
+		}
 	} else {
 		invokeMap[methodName] = op
-		logger.Infof("MQStream RegisterInvoke methodName:%s for op:%p", methodName, op)
+		if logger != nil {
+			logger.Infof("MQStream RegisterInvoke methodName:%s for op:%p", methodName, op)
+		}
 	}
 }
 
