@@ -21,7 +21,6 @@ const (
 	colorGray   = "\033[90m"
 )
 
-// Logger interface that consuming applications can implement.
 type Logger interface {
 	Debugf(format string, args ...any)
 	Infof(format string, args ...any)
@@ -29,7 +28,6 @@ type Logger interface {
 	Errorf(format string, args ...any)
 }
 
-// ColorHandler implements a colored slog handler
 type ColorHandler struct {
 	handler    slog.Handler
 	w          io.Writer
@@ -38,7 +36,6 @@ type ColorHandler struct {
 	cacheMutex sync.RWMutex
 }
 
-// NewColorHandler creates a new colored handler
 func NewColorHandler(w io.Writer, opts *slog.HandlerOptions) *ColorHandler {
 	if opts == nil {
 		opts = &slog.HandlerOptions{}
@@ -166,7 +163,6 @@ func getLogLevelFromEnv() slog.Level {
 	}
 }
 
-// slogLogger wraps slog.Logger to implement the Logger interface
 type slogLogger struct {
 	logger *slog.Logger
 }
@@ -187,7 +183,6 @@ func (l *slogLogger) Errorf(format string, args ...any) {
 	l.logger.Error(fmt.Sprintf(format, args...))
 }
 
-// stdLogger wraps standard log.Logger.
 type stdLogger struct {
 	logger *log.Logger
 }
@@ -208,7 +203,6 @@ func (l *stdLogger) Errorf(format string, args ...any) {
 	l.logger.Printf("[ERROR] "+format, args...)
 }
 
-// Package-level logger instance.
 var logger Logger
 
 func init() {
@@ -220,28 +214,24 @@ func init() {
 	logger = &slogLogger{logger: slogInstance}
 }
 
-// SetLogger allows consuming applications to inject their own logger.
 func SetLogger(l Logger) {
 	if l != nil {
 		logger = l
 	}
 }
 
-// SetStdLogger is a convenience function to use Go's standard log.Logger.
 func SetStdLogger(l *log.Logger) {
 	if l != nil {
 		logger = &stdLogger{logger: l}
 	}
 }
 
-// SetSlogLogger is a convenience function to use Go's slog.Logger.
 func SetSlogLogger(l *slog.Logger) {
 	if l != nil {
 		logger = &slogLogger{logger: l}
 	}
 }
 
-// GetLogger returns the current logger instance.
 func GetLogger() Logger {
 	return logger
 }
