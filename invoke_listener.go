@@ -102,6 +102,7 @@ func getReplyChannel(req *InvoiceRequest) string {
 
 func init() {
 	RegisterListener(&MessageInvokeListener{})
+
 	if logger != nil {
 		logger.Infof("MessageInvokeListener RegisterListener")
 	}

@@ -58,6 +58,7 @@ func RegisterListener(i IMessageListener) {
 	} else {
 		messageKey := GetMessageKey(i.GetTopic(), i.GetTag())
 		Listeners()[messageKey] = i
+
 		Topics = append(Topics, i.GetTopic())
 		if logger != nil {
 			logger.Infof("Redismq Register IMessageListener:%s,Consumer:%s", i, messageKey)
