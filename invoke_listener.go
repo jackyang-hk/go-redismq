@@ -8,7 +8,6 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -28,16 +27,16 @@ func (t MessageInvokeListener) Consume(ctx context.Context, message *Message) Ac
 
 	err := UnmarshalFromJsonString(message.Body, &req)
 	if err != nil {
-		g.Log().Errorf(ctx, "MessageInvokeListener UnmarshalFromJsonString Body error %s", err.Error())
+		logger.Errorf("MessageInvokeListener UnmarshalFromJsonString Body error %s", err.Error())
 		//ignore
 		return CommitMessage
 	}
 
 	if req == nil || req.Group != Group || len(req.MessageId) == 0 || len(req.Method) == 0 {
 		if req.Group != Group {
-			g.Log().Infof(ctx, "MessageInvokeListener Skip Request Group:%s Request Group:%s", Group, req.Group)
+			logger.Infof("MessageInvokeListener Skip Request Group:%s Request Group:%s", Group, req.Group)
 		} else {
-			g.Log().Errorf(ctx, "MessageInvokeListener Group:%s Invalid Request:%s", Group, MarshalToJsonString(req))
+			logger.Errorf("MessageInvokeListener Group:%s Invalid Request:%s", Group, MarshalToJsonString(req))
 		}
 		//ignore
 		return CommitMessage
@@ -49,7 +48,7 @@ func (t MessageInvokeListener) Consume(ctx context.Context, message *Message) Ac
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream Closs Redis Stream Client error:%s\n", err.Error())
+			logger.Errorf("MQStream Closs Redis Stream Client error:%s", err.Error())
 		}
 	}(client)
 
@@ -63,8 +62,8 @@ func (t MessageInvokeListener) Consume(ctx context.Context, message *Message) Ac
 				err = gerror.NewCodef(gcode.CodeInternalPanic, "%+v", exception)
 			}
 
-			fmt.Printf("MQStream invoke err method:%s panic:%v\n", req.Method, err)
-			fmt.Printf("MQStream invoke err stack trace:\n%s", debug.Stack())
+			logger.Errorf("MQStream invoke err method:%s panic:%v", req.Method, err)
+			logger.Errorf("MQStream invoke err stack trace:\n%s", debug.Stack())
 
 			res.Response = err.Error()
 			res.Status = false
@@ -103,19 +102,19 @@ func getReplyChannel(req *InvoiceRequest) string {
 
 func init() {
 	RegisterListener(&MessageInvokeListener{})
-	fmt.Println("MessageInvokeListener RegisterListener")
+	logger.Infof("MessageInvokeListener RegisterListener")
 }
 
 var invokeMap = make(map[string]func(ctx context.Context, request interface{}) (response interface{}, err error))
 
 func RegisterInvoke(methodName string, op func(ctx context.Context, request interface{}) (response interface{}, err error)) {
 	if len(methodName) <= 0 || op == nil {
-		fmt.Printf("MQStream RegisterInvoke error methodName:%s or op:%p is nil\n", methodName, op)
+		logger.Errorf("MQStream RegisterInvoke error methodName:%s or op:%p is nil", methodName, op)
 	} else if _, ok := invokeMap[methodName]; ok {
-		fmt.Printf("MQStream RegisterInvoke error exist Old One:%s for op:%p\n", methodName, op)
+		logger.Warnf("MQStream RegisterInvoke error exist Old One:%s for op:%p", methodName, op)
 	} else {
 		invokeMap[methodName] = op
-		fmt.Printf("MQStream RegisterInvoke methodName:%s for op:%p\n", methodName, op)
+		logger.Infof("MQStream RegisterInvoke methodName:%s for op:%p", methodName, op)
 	}
 }
 
@@ -124,7 +123,7 @@ func keepAliveMessageInvokeListener() {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("MQStream Closs Redis Stream Client error:%s\n", err.Error())
+			logger.Errorf("MQStream Closs Redis Stream Client error:%s", err.Error())
 		}
 	}(client)
 

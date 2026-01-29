@@ -3,7 +3,6 @@ package go_redismq
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/encoding/gjson"
@@ -34,7 +33,7 @@ func SendTransaction(message *Message, transactionExecuter func(messageToSend *M
 	case RollbackTransaction:
 		_, rollBackErr := rollbackTransactionPrepareMessage(message)
 		if rollBackErr != nil {
-			fmt.Printf("rollbackTransactionPrepareMessage err:%s rollBackError:%s\n", err, rollBackErr)
+			logger.Errorf("rollbackTransactionPrepareMessage err:%s rollBackError:%s", err, rollBackErr)
 		}
 
 		return false, err
@@ -48,7 +47,7 @@ func SendTransaction(message *Message, transactionExecuter func(messageToSend *M
 func sendDelayMessage(message *Message) bool {
 	Assert(message.StartDeliverTime-gtime.Now().Timestamp() > 0, "StartDeliverTime Invalid, should > now")
 	send, err := SendDelay(message, message.StartDeliverTime-gtime.Now().Timestamp())
-	fmt.Printf("Redismq SendDelayMessage result:%v", send)
+	logger.Infof("Redismq SendDelayMessage result:%v", send)
 
 	if err != nil {
 		return false
@@ -70,17 +69,19 @@ func sendMessage(message *Message, source string) (bool, error) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("sendMessage error:%s\n", err)
+			logger.Errorf("sendMessage error:%s", err)
 		}
 	}(client)
 
 	streamMessageId, err := client.XAdd(context.Background(), message.toStreamAddArgsValues(GetQueueName(message.Topic))).Result()
 	if err != nil {
-		return false, fmt.Errorf("RedisMQ_Send Stream Message exception:%w queueName=%s message:%v\n", err, GetQueueName(message.Topic), MarshalToJsonString(message))
+		logger.Errorf("RedisMQ_Send Stream Message exception:%s queueName=%s message:%v", err, GetQueueName(message.Topic), MarshalToJsonString(message))
+
+		return false, err
 	}
 
 	message.MessageId = streamMessageId
-	fmt.Printf("RedisMQ_Send Stream Message Success Source:%s QueueName=%s messageKey:%s MessageId=%v\n", source, GetQueueName(message.Topic), GetMessageKey(message.Topic, message.Tag), message.MessageId)
+	logger.Infof("RedisMQ_Send Stream Message Success Source:%s QueueName=%s messageKey:%s MessageId=%v", source, GetQueueName(message.Topic), GetMessageKey(message.Topic, message.Tag), message.MessageId)
 
 	return true, nil
 }
@@ -97,7 +98,7 @@ func sendTransactionPrepareMessage(message *Message) (bool, error) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("sendTransactionPrepareMessage error:%s\n", err)
+			logger.Errorf("sendTransactionPrepareMessage error:%s", err)
 		}
 	}(client)
 
@@ -106,7 +107,9 @@ func sendTransactionPrepareMessage(message *Message) (bool, error) {
 	jsonString := string(messageJson)
 
 	if err != nil {
-		return false, fmt.Errorf("Send MQ Transaction Pre exception:%s message:%v\n", err.Error(), message)
+		logger.Errorf("Send MQ Transaction Pre exception:%s message:%v", err.Error(), message)
+
+		return false, err
 	}
 	// 执行事务
 	_, err = client.TxPipelined(context.Background(), func(pipe redis.Pipeliner) error {
@@ -116,7 +119,9 @@ func sendTransactionPrepareMessage(message *Message) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("Send MQ Transaction Pre  exception:%s message:%v\n", err.Error(), message)
+		logger.Errorf("Send MQ Transaction Pre  exception:%s message:%v", err.Error(), message)
+
+		return false, err
 	}
 
 	return true, nil
@@ -132,7 +137,7 @@ func delTransactionPrepareMessage(message *Message) (bool, error) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("delTransactionPrepareMessage error:%s\n", err)
+			logger.Errorf("delTransactionPrepareMessage error:%s", err)
 		}
 	}(client)
 
@@ -143,10 +148,12 @@ func delTransactionPrepareMessage(message *Message) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("Del MQ Transaction Pre  exception:%w message:%v\n", err, message)
+		logger.Errorf("Del MQ Transaction Pre  exception:%s message:%v", err, message)
+
+		return false, err
 	}
 
-	fmt.Printf("rollbackTransactionPrepareMessage message:%v\n", message)
+	logger.Infof("rollbackTransactionPrepareMessage message:%v", message)
 
 	return true, nil
 }
@@ -159,7 +166,7 @@ func commitTransactionPrepareMessage(message *Message) (bool, error) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("commmitTransactionPrepareMessage error:%s\n", err)
+			logger.Errorf("commmitTransactionPrepareMessage error:%s", err)
 		}
 	}(client)
 
@@ -175,10 +182,12 @@ func commitTransactionPrepareMessage(message *Message) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("Commit MQ Transaction Pre  exception:%w message:%v\n", err, message)
+		logger.Errorf("Commit MQ Transaction Pre  exception:%s message:%v", err, message)
+
+		return false, err
 	}
 
-	fmt.Printf("Redismq commitTransactionPrepareMessage success message:%v prepareMessageId:%s targetMessageId:%s ", message, oldMessageId, streamMessageId)
+	logger.Infof("Redismq commitTransactionPrepareMessage success message:%v prepareMessageId:%s targetMessageId:%s", message, oldMessageId, streamMessageId)
 
 	return true, nil
 }

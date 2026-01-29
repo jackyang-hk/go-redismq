@@ -1,7 +1,6 @@
 package go_redismq
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/gogf/gf/v2/encoding/gjson"
@@ -56,10 +55,10 @@ func test() {
 		Age:    30,
 		Emails: []string{"alice@example.com", "alice@gmail.com"},
 	}
-	fmt.Printf("Serialize result:%s \n", Serialize(p))
+	logger.Infof("Serialize result:%s", Serialize(p))
 
 	var value float64
 
 	err := Deserialize(Serialize(1.3655), &value)
-	fmt.Printf("Deserialize result:%f err:%s \n", value, err)
+	logger.Infof("Deserialize result:%f err:%s", value, err)
 }
