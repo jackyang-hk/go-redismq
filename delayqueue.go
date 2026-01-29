@@ -16,21 +16,17 @@ const (
 
 func StartDelayBackgroundThread() {
 	go func() {
-		for {
-			startDelayBackgroundThreadIteration()
+		defer func() {
+			if exception := recover(); exception != nil {
+				logger.Errorf("Redismq polligCore panic error:%s", exception)
 
+				return
+			}
+		}()
+
+		for {
 			polling()
 			time.Sleep(10 * time.Second)
-		}
-	}()
-}
-
-func startDelayBackgroundThreadIteration() {
-	defer func() {
-		if exception := recover(); exception != nil {
-			logger.Errorf("Redismq polligCore panic error:%s", exception)
-
-			return
 		}
 	}()
 }
