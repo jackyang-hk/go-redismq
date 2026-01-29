@@ -14,25 +14,13 @@ type RedisMqConfig struct {
 	Database int
 }
 
-//type IRedisMqConConfig interface {
-//	GetRedisStreamConfig() (res *RedisMqConfig)
-//}
-
-//var instance IRedisMqConConfig
-//
-//func SharedConfig() IRedisMqConConfig {
-//	if instance == nil {
-//		panic("implement not found for interface IRedisMqConConfig, forgot register?")
-//	}
-//	return instance
-//}
-
 func RegisterRedisMqConfig(one *RedisMqConfig) {
 	Assert(one != nil, "RegisterRedisMqConfig GetRedisStreamConfig nil")
 	Assert(len(one.Addr) > 0, "RegisterRedisMqConfig Addr is blank")
 	Assert(len(one.Group) > 0, "RegisterRedisMqConfig Group is blank")
 	Group = one.Group
 	addr = one.Addr
+
 	password = one.Password
 	if one.Database >= 0 {
 		database = one.Database
@@ -43,6 +31,7 @@ func GetRedisConfig() *redis.Options {
 	if len(addr) == 0 {
 		panic("Invalid redismq config, addr forgot setup?")
 	}
+
 	return &redis.Options{
 		Addr:     addr,
 		Password: password,

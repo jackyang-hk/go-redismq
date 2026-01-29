@@ -1,36 +1,36 @@
 package go_redismq
 
 import (
-	"fmt"
+	"strings"
+
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/redis/go-redis/v9"
-	"strings"
 )
 
 const DefaultConsumerDelayMilliSeconds = 1500
 
 type Message struct {
-	MessageId                 string                 `json:"messageId" dc:"MessageId"`
-	Topic                     string                 `json:"topic" dc:"Topic"`
-	Tag                       string                 `json:"tag" dc:"Tag"`
-	Body                      string                 `json:"body" dc:"Body"`
-	Key                       string                 `json:"key" dc:"Key"`
-	StartDeliverTime          int64                  `json:"startDeliverTime" dc:"Send Time,0-No Delay，Second"`
-	ReconsumeTimes            int                    `json:"reconsumeTimes" dc:"Reconsume Count"`
-	ReconsumeMax              int                    `json:"reconsumeMax" dc:"Reconsume Max Count"`
-	CustomData                map[string]interface{} `json:"customData" dc:"CustomData"`
-	SendTime                  int64                  `json:"sendTime" dc:"Sent Time"`
-	ConsumerDelayMilliSeconds int                    `json:"consumerDelayMilliSeconds" dc:"Consumer Delay Milliseconds"`
+	MessageId                 string                 `dc:"MessageId"                    json:"messageId"`
+	Topic                     string                 `dc:"Topic"                        json:"topic"`
+	Tag                       string                 `dc:"Tag"                          json:"tag"`
+	Body                      string                 `dc:"Body"                         json:"body"`
+	Key                       string                 `dc:"Key"                          json:"key"`
+	StartDeliverTime          int64                  `dc:"Send Time,0-No Delay, Second" json:"startDeliverTime"`
+	ReconsumeTimes            int                    `dc:"Reconsume Count"              json:"reconsumeTimes"`
+	ReconsumeMax              int                    `dc:"Reconsume Max Count"          json:"reconsumeMax"`
+	CustomData                map[string]interface{} `dc:"CustomData"                   json:"customData"`
+	SendTime                  int64                  `dc:"Sent Time"                    json:"sendTime"`
+	ConsumerDelayMilliSeconds int                    `dc:"Consumer Delay Milliseconds"  json:"consumerDelayMilliSeconds"`
 }
 
 type MessageMetaData struct {
-	StartDeliverTime          int64                  `json:"startDeliverTime" dc:"Send Time,0-No Delay，Second"`
-	ReconsumeTimes            int                    `json:"reconsumeTimes" dc:"Reconsume Count"`
-	ReconsumeMax              int                    `json:"reconsumeMax" dc:"Reconsume Max Count"`
-	CustomData                map[string]interface{} `json:"customData" dc:"CustomData"`
-	Key                       string                 `json:"key" dc:"Key"`
-	SendTime                  int64                  `json:"sendTime" dc:"SendTime"`
-	ConsumerDelayMilliSeconds int                    `json:"consumerDelayMilliSeconds" dc:"Consumer Delay Milliseconds"`
+	StartDeliverTime          int64                  `dc:"Send Time,0-No Delay, Second" json:"startDeliverTime"`
+	ReconsumeTimes            int                    `dc:"Reconsume Count"              json:"reconsumeTimes"`
+	ReconsumeMax              int                    `dc:"Reconsume Max Count"          json:"reconsumeMax"`
+	CustomData                map[string]interface{} `dc:"CustomData"                   json:"customData"`
+	Key                       string                 `dc:"Key"                          json:"key"`
+	SendTime                  int64                  `dc:"SendTime"                     json:"sendTime"`
+	ConsumerDelayMilliSeconds int                    `dc:"Consumer Delay Milliseconds"  json:"consumerDelayMilliSeconds"`
 }
 
 func NewRedisMQMessage(topicWrapper MQTopicEnum, body string) *Message {
@@ -46,12 +46,15 @@ func (message *Message) getUniqueKey() string {
 	if message.CustomData == nil {
 		message.CustomData = make(map[string]interface{})
 	}
+
 	uniqueKey := ""
 	if value, ok := message.CustomData["uniqueKey"].(string); ok && len(value) > 0 {
 		uniqueKey = value
 	}
+
 	if len(uniqueKey) == 0 && len(message.MessageId) > 0 {
 		message.CustomData["uniqueKey"] = message.MessageId
+
 		return message.MessageId
 	} else {
 		return uniqueKey
@@ -66,14 +69,11 @@ func (message *Message) isBoardCastingMessage() bool {
 	}
 }
 
-func (message *Message) getDescription() string {
-	return fmt.Sprintf("%s %s %s", message.MessageId, message.Topic, message.Tag)
-}
-
 func (message *Message) toStreamAddArgsValues(stream string) *redis.XAddArgs {
 	if message.ConsumerDelayMilliSeconds == 0 {
 		message.ConsumerDelayMilliSeconds = DefaultConsumerDelayMilliSeconds
 	}
+
 	metadata := MessageMetaData{
 		StartDeliverTime:          message.StartDeliverTime,
 		ReconsumeTimes:            message.ReconsumeTimes,
@@ -83,12 +83,14 @@ func (message *Message) toStreamAddArgsValues(stream string) *redis.XAddArgs {
 		SendTime:                  CurrentTimeMillis(),
 	}
 	metaJson, _ := gjson.Marshal(metadata)
+
 	var values = map[string]interface{}{
 		"topic":    message.Topic,
 		"tag":      message.Tag,
 		"body":     message.Body,
 		"metadata": string(metaJson),
 	}
+
 	return &redis.XAddArgs{
 		Stream: stream,
 		Values: values,
@@ -99,34 +101,42 @@ func (message *Message) passStreamMessage(value map[string]interface{}) {
 	if target, ok := value["topic"].(string); ok {
 		message.Topic = target
 	}
+
 	if target, ok := value["tag"].(string); ok {
 		message.Tag = target
 	}
+
 	if target, ok := value["body"].(string); ok {
 		message.Body = target
 	}
+
 	var metadata string
 	if target, ok := value["metadata"].(string); ok {
 		metadata = target
 	}
+
 	if len(metadata) > 0 {
-		json, err := gjson.LoadJson(metadata, true)
+		json, err := gjson.LoadJson([]byte(metadata), true)
 		if err == nil {
 			defer func() {
 				if exception := recover(); exception != nil {
-					fmt.Printf("Redismq passStreamMessage panic error:%s\n", exception)
+					logger.Errorf("Redismq passStreamMessage panic error:%s", exception)
+
 					return
 				}
 			}()
+
 			message.ReconsumeTimes = json.Get("reconsumeTimes").Int()
 			message.ReconsumeMax = json.Get("reconsumeMax").Int()
 			message.StartDeliverTime = json.Get("startDeliverTime").Int64()
+
 			message.SendTime = json.Get("sendTime").Int64()
 			if json.Contains("consumerDelayMilliSeconds") {
 				if consumerDelayMilliSeconds := json.Get("consumerDelayMilliSeconds"); consumerDelayMilliSeconds != nil {
 					message.ConsumerDelayMilliSeconds = consumerDelayMilliSeconds.Int()
 				}
 			}
+
 			message.CustomData = json.Get("customData").Map()
 			message.Key = json.Get("key").String()
 			message.getUniqueKey()

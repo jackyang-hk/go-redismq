@@ -3,16 +3,17 @@ package go_redismq
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strings"
+
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/redis/go-redis/v9"
-	"strings"
 )
 
 func Send(message *Message) (bool, error) {
 	return sendMessage(message, "ProducerWrapper")
 }
+
 func SendTransaction(message *Message, transactionExecuter func(messageToSend *Message) (TransactionStatus, error)) (bool, error) {
 	if strings.Compare(message.Tag, "blank") == 0 {
 		return false, errors.New("blank tag message")
@@ -26,19 +27,19 @@ func SendTransaction(message *Message, transactionExecuter func(messageToSend *M
 	if err != nil || !send {
 		return send, err
 	}
+
 	status, err := transactionExecuter(message)
-	if status == RollbackTransaction {
-		//事务执行失败，回滚半消息
+	switch status {
+	case RollbackTransaction:
 		_, rollBackErr := rollbackTransactionPrepareMessage(message)
 		if rollBackErr != nil {
-			fmt.Printf("rollbackTransactionPrepareMessage err:%s rollBackError:%s\n", err, rollBackErr)
+			logger.Errorf("rollbackTransactionPrepareMessage err:%s rollBackError:%s", err, rollBackErr)
 		}
+
 		return false, err
-	} else if status == CommitTransaction {
-		//事务执行成功，提交半消息，如提交失败，需使用 实现相应Checker 保障消息一致性 todo mark
+	case CommitTransaction:
 		return commitTransactionPrepareMessage(message)
-	} else {
-		//未知状态，一般在用户无法确定事务是成功还是失败时使用，对于未知状态的事务，服务端会定期进行事务回查
+	default:
 		return false, errors.New("unknown transaction status")
 	}
 }
@@ -46,10 +47,12 @@ func SendTransaction(message *Message, transactionExecuter func(messageToSend *M
 func sendDelayMessage(message *Message) bool {
 	Assert(message.StartDeliverTime-gtime.Now().Timestamp() > 0, "StartDeliverTime Invalid, should > now")
 	send, err := SendDelay(message, message.StartDeliverTime-gtime.Now().Timestamp())
-	fmt.Printf("Redismq SendDelayMessage result:%v", send)
+	logger.Infof("Redismq SendDelayMessage result:%v", send)
+
 	if err != nil {
 		return false
 	}
+
 	return send
 }
 
@@ -60,22 +63,26 @@ func sendMessage(message *Message, source string) (bool, error) {
 
 	message.SendTime = CurrentTimeMillis()
 	Assert(len(message.MessageId) == 0, "Send Stream Need Blank MessageId")
+
 	client := redis.NewClient(GetRedisConfig())
 
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("sendMessage error:%s\n", err)
+			logger.Errorf("sendMessage error:%s", err)
 		}
 	}(client)
 
-	// 发送消息到 Stream
 	streamMessageId, err := client.XAdd(context.Background(), message.toStreamAddArgsValues(GetQueueName(message.Topic))).Result()
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("RedisMQ_Send Stream Message exception:%s queueName=%s message:%v\n", err, GetQueueName(message.Topic), MarshalToJsonString(message)))
+		logger.Errorf("RedisMQ_Send Stream Message exception:%s queueName=%s message:%v", err, GetQueueName(message.Topic), MarshalToJsonString(message))
+
+		return false, err
 	}
+
 	message.MessageId = streamMessageId
-	fmt.Printf("RedisMQ_Send Stream Message Success Source:%s QueueName=%s messageKey:%s MessageId=%v\n", source, GetQueueName(message.Topic), GetMessageKey(message.Topic, message.Tag), message.MessageId)
+	logger.Infof("RedisMQ_Send Stream Message Success Source:%s QueueName=%s messageKey:%s MessageId=%v", source, GetQueueName(message.Topic), GetMessageKey(message.Topic, message.Tag), message.MessageId)
+
 	return true, nil
 }
 
@@ -83,6 +90,7 @@ func sendTransactionPrepareMessage(message *Message) (bool, error) {
 	if strings.Compare(message.Tag, "blank") == 0 {
 		return false, errors.New("Blank Message")
 	}
+
 	message.MessageId = GenerateUniqueNo(message.Topic)
 	message.SendTime = CurrentTimeMillis()
 	client := redis.NewClient(GetRedisConfig())
@@ -90,28 +98,32 @@ func sendTransactionPrepareMessage(message *Message) (bool, error) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("sendTransactionPrepareMessage error:%s\n", err)
+			logger.Errorf("sendTransactionPrepareMessage error:%s", err)
 		}
 	}(client)
+
 	messageJson, err := gjson.Marshal(message)
 
 	jsonString := string(messageJson)
+
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("Send MQ Transaction Pre exception:%s message:%v\n", err.Error(), message))
+		logger.Errorf("Send MQ Transaction Pre exception:%s message:%v", err.Error(), message)
+
+		return false, err
 	}
 	// 执行事务
 	_, err = client.TxPipelined(context.Background(), func(pipe redis.Pipeliner) error {
-		// 在事务中执行多个命令
-		//pipe.Incr(context.Background(), key)  // 递增键的值
-		//pipe.Expire(context.Background(), key, 10*time.Second)  // 设置键的过期时间
 		pipe.Set(context.Background(), message.MessageId, jsonString, -1)
 		pipe.LPush(context.Background(), GetTransactionPrepareQueueName(message.Topic), message.MessageId)
+
 		return nil
 	})
-
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("Send MQ Transaction Pre  exception:%s message:%v\n", err.Error(), message))
+		logger.Errorf("Send MQ Transaction Pre  exception:%s message:%v", err.Error(), message)
+
+		return false, err
 	}
+
 	return true, nil
 }
 
@@ -125,22 +137,24 @@ func delTransactionPrepareMessage(message *Message) (bool, error) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("delTransactionPrepareMessage error:%s\n", err)
+			logger.Errorf("delTransactionPrepareMessage error:%s", err)
 		}
 	}(client)
 
-	// 执行事务
 	_, err := client.TxPipelined(context.Background(), func(pipe redis.Pipeliner) error {
-		// 在事务中执行多个命令
 		pipe.Del(context.Background(), message.MessageId)
 		pipe.LRem(context.Background(), GetTransactionPrepareQueueName(message.Topic), 1, message.MessageId)
+
 		return nil
 	})
-
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("Del MQ Transaction Pre  exception:%s message:%v\n", err, message))
+		logger.Errorf("Del MQ Transaction Pre  exception:%s message:%v", err, message)
+
+		return false, err
 	}
-	fmt.Printf("rollbackTransactionPrepareMessage message:%v\n", message)
+
+	logger.Infof("rollbackTransactionPrepareMessage message:%v", message)
+
 	return true, nil
 }
 
@@ -152,25 +166,28 @@ func commitTransactionPrepareMessage(message *Message) (bool, error) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("commmitTransactionPrepareMessage error:%s\n", err)
+			logger.Errorf("commmitTransactionPrepareMessage error:%s", err)
 		}
 	}(client)
+
 	streamMessageId := ""
-	// 执行事务提交半消息到 Stream
+
 	_, err := client.TxPipelined(context.Background(), func(pipe redis.Pipeliner) error {
-		// 在事务中执行多个命令
-		// 发送 Stream 消息
 		streamMessageId, _ = client.XAdd(context.Background(), message.toStreamAddArgsValues(GetQueueName(message.Topic))).Result()
 		message.MessageId = streamMessageId
-		// 删除事务半消息
+
 		pipe.Del(context.Background(), oldMessageId)
 		pipe.LRem(context.Background(), GetTransactionPrepareQueueName(message.Topic), 1, oldMessageId)
+
 		return nil
 	})
-
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("Commit MQ Transaction Pre  exception:%s message:%v\n", err, message))
+		logger.Errorf("Commit MQ Transaction Pre  exception:%s message:%v", err, message)
+
+		return false, err
 	}
-	fmt.Printf("Redismq commitTransactionPrepareMessage success message:%v prepareMessageId:%s targetMessageId:%s ", message, oldMessageId, streamMessageId)
+
+	logger.Infof("Redismq commitTransactionPrepareMessage success message:%v prepareMessageId:%s targetMessageId:%s", message, oldMessageId, streamMessageId)
+
 	return true, nil
 }

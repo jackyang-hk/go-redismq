@@ -9,10 +9,12 @@ func FormatToJsonString(target interface{}) string {
 	if target == nil {
 		return ""
 	}
+
 	encodeString, err := gjson.EncodeString(target)
 	if err != nil {
 		return ""
 	}
+
 	return encodeString
 }
 
@@ -20,6 +22,7 @@ func FormatToGJson(target interface{}) *gjson.Json {
 	if target == nil {
 		return nil
 	}
+
 	return gjson.New(target)
 }
 
@@ -27,10 +30,12 @@ func MarshalToJsonString(target interface{}) string {
 	if target == nil {
 		return ""
 	}
+
 	marshal, err := gjson.Marshal(target)
 	if err != nil {
 		return ""
 	}
+
 	return string(marshal)
 }
 
@@ -38,10 +43,12 @@ func MarshalMetadataToJsonString(target interface{}) *string {
 	if target == nil {
 		return nil
 	}
+
 	marshal, err := gjson.Marshal(target)
 	if err != nil {
 		return nil
 	}
+
 	return String(string(marshal))
 }
 
