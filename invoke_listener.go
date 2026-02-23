@@ -109,16 +109,34 @@ func RegisterInvoke(methodName string, op func(ctx context.Context, request inte
 }
 
 func keepAliveMessageInvokeListener() {
-	client := redis.NewClient(GetRedisConfig())
-	defer func(client *redis.Client) {
-		err := client.Close()
-		if err != nil {
-			fmt.Printf("MQStream Closs Redis Stream Client error:%s\n", err.Error())
-		}
-	}(client)
-	client.Set(context.Background(), fmt.Sprintf("MessageInvokeGroup:%s", Group), true, 300*time.Second)
+	key := fmt.Sprintf("MessageInvokeGroup:%s", Group)
 	for {
-		time.Sleep(60 * time.Second)
-		client.Expire(context.Background(), fmt.Sprintf("MessageInvokeGroup:%s", Group), 300*time.Second)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("MQStream keepAliveMessageInvokeListener panic recovered: %v\n", r)
+				}
+			}()
+			client := redis.NewClient(GetRedisConfig())
+			defer func(client *redis.Client) {
+				err := client.Close()
+				if err != nil {
+					fmt.Printf("MQStream keepAliveMessageInvokeListener Close Redis Client error:%s\n", err.Error())
+				}
+			}(client)
+			ctx := context.Background()
+			if err := client.Set(ctx, key, true, 300*time.Second).Err(); err != nil {
+				fmt.Printf("MQStream keepAliveMessageInvokeListener Set failed: %v\n", err)
+				return
+			}
+			for {
+				time.Sleep(60 * time.Second)
+				if err := client.Expire(ctx, key, 300*time.Second).Err(); err != nil {
+					fmt.Printf("MQStream keepAliveMessageInvokeListener Expire failed: %v\n", err)
+					return // exit inner loop, outer for will recreate client and retry
+				}
+			}
+		}()
+		time.Sleep(5 * time.Second) // brief wait before retry after failure
 	}
 }
