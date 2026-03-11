@@ -14,7 +14,7 @@ func TestMethodInvoke(t *testing.T) {
 	goredismq.RegisterRedisMqConfig(&goredismq.RedisMqConfig{
 		Group:    TestGroup,
 		Addr:     "127.0.0.1:6379",
-		Password: "",
+		Password: "changeme",
 		Database: 0,
 	})
 	goredismq.RegisterListener(&TestListener{})

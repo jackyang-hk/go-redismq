@@ -2,7 +2,6 @@ package go_redismq
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/frame/g"
@@ -12,8 +11,16 @@ import (
 	"time"
 )
 
-const (
-	MqDelayQueueName = "MQ_DELAY_QUEUE_SET"
+const MqDelayQueueName = "MQ_DELAY_QUEUE_SET"
+
+var (
+	// DelayQueuePollBatchSize is the number of due messages to fetch from the delay queue ZSet per poll (default 10).
+	// Can be set before StartRedisMqConsumer or at runtime, e.g. go_redismq.DelayQueuePollBatchSize = 50
+	DelayQueuePollBatchSize = 10
+
+	// DelayQueuePollInterval is the delay queue polling interval (default 5s).
+	// Can be set before StartRedisMqConsumer or at runtime, e.g. go_redismq.DelayQueuePollInterval = 2 * time.Second
+	DelayQueuePollInterval = 5 * time.Second
 )
 
 func StartDelayBackgroundThread() {
@@ -21,12 +28,16 @@ func StartDelayBackgroundThread() {
 		for {
 			defer func() {
 				if exception := recover(); exception != nil {
-					fmt.Printf("Redismq polligCore panic error:%s\n", exception)
+					fmt.Printf("Redismq pollingCore panic error:%s\n", exception)
 					return
 				}
 			}()
 			polling()
-			time.Sleep(10 * time.Second)
+			interval := DelayQueuePollInterval
+			if interval <= 0 {
+				interval = 5 * time.Second
+			}
+			time.Sleep(interval)
 		}
 	}()
 }
@@ -53,7 +64,7 @@ func polling() {
 func pollingCore(key string) {
 	defer func() {
 		if exception := recover(); exception != nil {
-			fmt.Printf("RedisMq polligCore panic error:%s\n", exception)
+			fmt.Printf("RedisMq pollingCore panic error:%s\n", exception)
 			return
 		}
 	}()
@@ -63,15 +74,19 @@ func pollingCore(key string) {
 	defer func(client *redis.Client) {
 		err := client.Close()
 		if err != nil {
-			fmt.Printf("RedisMq polligCore error:%s\n", err.Error())
+			fmt.Printf("RedisMq pollingCore error:%s\n", err.Error())
 		}
 	}(client)
 	ctx := context.Background()
+	batchSize := DelayQueuePollBatchSize
+	if batchSize <= 0 {
+		batchSize = 10
+	}
 	result, err := client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
 		Min:    "0",
 		Max:    strconv.FormatInt(gtime.Now().Timestamp(), 10),
 		Offset: 0,
-		Count:  1,
+		Count:  int64(batchSize),
 	}).Result()
 	if err != nil {
 		return
@@ -114,7 +129,7 @@ func SendDelay(message *Message, delay int64) (bool, error) {
 	}(client)
 	messageJson, err := gjson.Marshal(message)
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("RedisMq SendDelay exception:%s message:%v\n", err.Error(), message))
+		return false, fmt.Errorf("RedisMq SendDelay exception:%s message:%v", err.Error(), message)
 	}
 	jsonString := string(messageJson)
 	score := gtime.Now().Timestamp() + delay
@@ -123,7 +138,7 @@ func SendDelay(message *Message, delay int64) (bool, error) {
 		Member: jsonString,
 	}).Result()
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("SendDelay exception:%s message:%v\n", err.Error(), message))
+		return false, fmt.Errorf("SendDelay exception:%s message:%v", err.Error(), message)
 	}
 	//fmt.Printf("RedisMq Push To Deplay Queue,Name[%s],Task[%s],Score[%d],Result[%v]\n", MqDelayQueueName, messageJson, score, result)
 	return true, nil
