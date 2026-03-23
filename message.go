@@ -21,6 +21,8 @@ type Message struct {
 	CustomData                map[string]interface{} `json:"customData" dc:"CustomData"`
 	SendTime                  int64                  `json:"sendTime" dc:"Sent Time"`
 	ConsumerDelayMilliSeconds int                    `json:"consumerDelayMilliSeconds" dc:"Consumer Delay Milliseconds"`
+	NextRetryDelaySeconds     int64                  `json:"nextRetryDelaySeconds" dc:"Next Retry Delay Seconds"`
+	NextDeliverAt             int64                  `json:"nextDeliverAt" dc:"Next Deliver At, Unix Seconds"`
 }
 
 type MessageMetaData struct {
@@ -31,6 +33,8 @@ type MessageMetaData struct {
 	Key                       string                 `json:"key" dc:"Key"`
 	SendTime                  int64                  `json:"sendTime" dc:"SendTime"`
 	ConsumerDelayMilliSeconds int                    `json:"consumerDelayMilliSeconds" dc:"Consumer Delay Milliseconds"`
+	NextRetryDelaySeconds     int64                  `json:"nextRetryDelaySeconds" dc:"Next Retry Delay Seconds"`
+	NextDeliverAt             int64                  `json:"nextDeliverAt" dc:"Next Deliver At, Unix Seconds"`
 }
 
 func NewRedisMQMessage(topicWrapper MQTopicEnum, body string) *Message {
@@ -81,6 +85,8 @@ func (message *Message) toStreamAddArgsValues(stream string) *redis.XAddArgs {
 		Key:                       message.Key,
 		ConsumerDelayMilliSeconds: message.ConsumerDelayMilliSeconds,
 		SendTime:                  CurrentTimeMillis(),
+		NextRetryDelaySeconds:     message.NextRetryDelaySeconds,
+		NextDeliverAt:             message.NextDeliverAt,
 	}
 	metaJson, _ := gjson.Marshal(metadata)
 	var values = map[string]interface{}{
@@ -125,6 +131,16 @@ func (message *Message) passStreamMessage(value map[string]interface{}) {
 			if json.Contains("consumerDelayMilliSeconds") {
 				if consumerDelayMilliSeconds := json.Get("consumerDelayMilliSeconds"); consumerDelayMilliSeconds != nil {
 					message.ConsumerDelayMilliSeconds = consumerDelayMilliSeconds.Int()
+				}
+			}
+			if json.Contains("nextRetryDelaySeconds") {
+				if nextRetryDelaySeconds := json.Get("nextRetryDelaySeconds"); nextRetryDelaySeconds != nil {
+					message.NextRetryDelaySeconds = nextRetryDelaySeconds.Int64()
+				}
+			}
+			if json.Contains("nextDeliverAt") {
+				if nextDeliverAt := json.Get("nextDeliverAt"); nextDeliverAt != nil {
+					message.NextDeliverAt = nextDeliverAt.Int64()
 				}
 			}
 			message.CustomData = json.Get("customData").Map()

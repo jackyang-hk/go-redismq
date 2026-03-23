@@ -3,15 +3,17 @@ package go_redismq
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"net"
+	"strings"
+	"time"
+
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/redis/go-redis/v9"
-	"net"
-	"strings"
-	"time"
 )
 
 var consumerName = ""
@@ -404,10 +406,40 @@ func pushTaskToResumeLater(consumer IMessageListener, message *Message) bool {
 		return putMessageToDeathQueue(message.Topic, message.MessageId, message)
 	} else {
 		message.ReconsumeTimes = message.ReconsumeTimes + 1
-		var appendTime = MaxInt64(60, int64(60*message.ReconsumeTimes))
+		now := gtime.Now().Timestamp()
+		appendTime := resolveNextDelaySeconds(message, now)
 		message.StartDeliverTime = gtime.Now().Timestamp() + appendTime // resume every min till end
 		return sendDelayMessage(message)
 	}
+}
+
+func resolveNextDelaySeconds(message *Message, now int64) int64 {
+	// Default path: still anchored at linear 60×ReconsumeTimes (as in published docs), plus
+	// extra jitter that grows with retry count so later retries are less likely to align on the same second.
+	var appendTime int64
+	if message.NextDeliverAt > now {
+		appendTime = message.NextDeliverAt - now
+	} else if message.NextRetryDelaySeconds > 0 {
+		appendTime = message.NextRetryDelaySeconds
+	} else {
+		appendTime = defaultLinearRetryDelaySeconds(message.ReconsumeTimes)
+	}
+	return MinInt64(24*60*60, MaxInt64(1, appendTime))
+}
+
+// defaultLinearRetryDelaySeconds keeps the same linear base as before (max(60, 60*n) seconds),
+// then adds [0, spread] random seconds where spread grows with n (capped), to reduce thundering-herd retries.
+func defaultLinearRetryDelaySeconds(reconsumeTimes int) int64 {
+	base := MaxInt64(60, int64(60*reconsumeTimes))
+	spread := int64(10 * reconsumeTimes)
+	if spread > 300 {
+		spread = 300
+	}
+	if spread < 10 {
+		spread = 10
+	}
+	jitter := rand.Int63n(spread + 1)
+	return base + jitter
 }
 
 func putMessageToDeathQueue(topic string, id string, message *Message) bool {

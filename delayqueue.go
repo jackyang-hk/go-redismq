@@ -102,8 +102,9 @@ func pollingCore(key string) {
 			fmt.Printf("RedisMq Unmarshal Message Error:[%v]\n", err)
 			continue
 		}
-		err = client.ZRem(ctx, key, messageJson).Err()
-		if err == nil {
+		removed, remErr := client.ZRem(ctx, key, messageJson).Result()
+		dispatch, duplicate, remErrText := resolveDelayQueueDispatchDecision(removed, remErr)
+		if dispatch {
 			message.StartDeliverTime = 0
 			message.MessageId = ""
 			send, sendErr := sendMessage(message, "DelayQueue")
@@ -112,10 +113,25 @@ func pollingCore(key string) {
 			} else {
 				g.Log().Debugf(ctx, "RedisMq Delete From Delay Queue,And Send:%v\n", send)
 			}
-		} else {
-			g.Log().Debugf(ctx, "RedisMq Delete From Delay Err:%s\n", err.Error())
+		} else if duplicate {
+			g.Log().Debugf(ctx, "RedisMq skip duplicate dispatch key:%s\n", key)
+		} else if len(remErrText) > 0 {
+			g.Log().Debugf(ctx, "RedisMq Delete From Delay Err:%s\n", remErrText)
 		}
 	}
+}
+
+func resolveDelayQueueDispatchDecision(removed int64, remErr error) (dispatch bool, duplicate bool, errText string) {
+	if remErr != nil {
+		return false, false, remErr.Error()
+	}
+	if removed == 1 {
+		return true, false, ""
+	}
+	if removed == 0 {
+		return false, true, ""
+	}
+	return false, false, ""
 }
 
 func SendDelay(message *Message, delay int64) (bool, error) {
