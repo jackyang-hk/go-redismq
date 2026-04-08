@@ -22,6 +22,10 @@
 - [事务型发送](#事务型发送)
 - [Invoke（类 RPC）](#invoke类-rpc)
 - [可观测性（可选）](#可观测性可选)
+  - [如何注册](#如何注册)
+  - [`SendEvent.Operation` 取值](#sendeventoperation-取值)
+  - [`ConsumeEvent` 字段](#consumeevent-字段)
+  - [示例：适合打指标的 Observer](#示例适合打指标的-observer)
 - [测试](#测试)
 - [变更日志](#变更日志)
 
@@ -172,12 +176,78 @@ Stream 物理名称由 topic 与库内前缀拼接生成（如 `name.go` 中 `MQ
 
 ## 可观测性（可选）
 
-通过 **`SetObserver`** 注册全局 **`Observer`**（见 `observer.go`）：
+库在 `observer.go` 中提供 **`Observer`** 与 **`SetObserver`**，用于对接 **Prometheus**、**OpenTelemetry**、结构化日志或链路追踪；**库本身不依赖**这些框架。
 
-- **`OnSend`**：在 `send_stream`、`send_delay` 以及事务各阶段（如 `txn_prepare`、`txn_exec`、`txn_commit`、`txn_rollback`）完成后触发，带耗时与错误。
-- **`OnConsume`**：在业务 **`Consume` 返回后**触发，耗时为 **Consume 函数体内**时间（不含前置 sleep）；若 **`Consume` panic**，会再触发一次且 **`Panic=true`**（此时 `Action` 无意义）。
+### 如何注册
 
-回调必须 **极轻量**；重逻辑请异步处理。未注册时仅多一次读锁判空，对业务路径影响可忽略。
+1. 实现 **`Observer`**，实现 **`OnSend`**、**`OnConsume`** 两个方法。
+2. 进程启动时调用 **`SetObserver(你的实现)` 一次**（可与日志/指标初始化放在一起）。  
+   - 可在 **`RegisterRedisMqConfig` 前后**任意时刻注册（不访问 Redis）。  
+   - 若希望**从第一条消费开始就打点**，请在 **`StartRedisMqConsumer` 之前**注册。  
+3. 不需要观测时调用 **`SetObserver(nil)`**（例如单测）。
+
+**`SetObserver` 会覆盖**上一次注册；同一进程**同时只有一个** Observer 生效。
+
+### `SendEvent.Operation` 取值
+
+用 **`ev.Operation`** 做指标 label 或日志分类，常见取值如下：
+
+| `Operation` | 触发时机 |
+|-------------|----------|
+| `send_stream` | 普通 **`Send`** 完成（向 topic 对应 Stream `XADD`）。`Source` 一般为 `ProducerWrapper`。 |
+| `send_delay` | **`SendDelay`** 完成（写入延迟 ZSET）。 |
+| `txn_abort_validation` | 事务在准备前即失败（如 blank tag、延迟消息不允许事务等）。 |
+| `txn_prepare` | 事务 **prepare** 写 Redis 完成之后。 |
+| `txn_exec` | **你的** `transactionExecuter` 回调返回之后（是否业务回滚需结合返回的 `TransactionStatus`，仅靠 `Err` 不够时请在业务侧区分）。 |
+| `txn_rollback` | 回调指示回滚且库执行 **rollback** 半消息之后。 |
+| `txn_commit` | **commit** 半消息到 Stream 之后。 |
+| `txn_unknown_status` | 回调返回未知 `TransactionStatus`。 |
+
+每次回调都带有该步骤的 **`Duration`**、**`Success`**、**`Err`**（可能为 `nil`）。
+
+### `ConsumeEvent` 字段
+
+| 字段 | 含义 |
+|------|------|
+| `Topic`、`Tag`、`MessageKey` | 路由信息（`MessageKey` 为库内 `topic_tag` 风格键）。 |
+| `MessageId` | Redis Stream 消息 id。 |
+| `ReconsumeTimes` | **本次投递前**的重试次数。 |
+| `Action` | 监听器返回值（`CommitMessage` / `ReconsumeLater`）。**`Panic==true` 时无意义**。 |
+| `Duration` | **仅 `Consume` 函数体内**耗时（不含消费侧在 `Consume` 之前的 sleep）。 |
+| `Panic`、`PanicValue` | `Consume` panic 时会再回调一次并置 **`Panic=true`**。 |
+
+### 示例：适合打指标的 Observer
+
+**`OnSend` / `OnConsume` 内必须极快**：只做计数器、Histogram 的 `Observe`、或向无阻塞 channel 投递；**不要**在此处打网络慢日志或同步 RPC。
+
+```go
+import (
+    "context"
+    redismq "github.com/jackyang-hk/go-redismq"
+)
+
+type metricsObserver struct{}
+
+func (metricsObserver) OnSend(ctx context.Context, ev redismq.SendEvent) {
+    // 示例：按 operation + 是否成功计数
+    // metrics.RedisMQSendTotal.WithLabelValues(ev.Operation, strconv.FormatBool(ev.Success)).Inc()
+    // metrics.RedisMQSendSeconds.WithLabelValues(ev.Operation).Observe(ev.Duration.Seconds())
+    _ = ctx
+}
+
+func (metricsObserver) OnConsume(ctx context.Context, ev redismq.ConsumeEvent) {
+    // 示例：消费耗时直方图；panic 单独打 label
+    // metrics.RedisMQConsumeSeconds.WithLabelValues(ev.Topic, ev.Tag, strconv.FormatBool(ev.Panic)).Observe(ev.Duration.Seconds())
+    _ = ctx
+}
+
+// main / init 中（若要从首条消息起观测，放在 StartRedisMqConsumer 之前）:
+// redismq.SetObserver(metricsObserver{})
+```
+
+慢逻辑请用 **新 goroutine** 或后台 worker，避免阻塞 MQ 热路径。
+
+未注册 Observer 时，仅在各埋点处多一次读锁判空。
 
 ---
 

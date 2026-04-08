@@ -22,6 +22,10 @@ A Go message-queue library built on **Redis Streams** (primary delivery) and a *
 - [Transactional produce](#transactional-produce)
 - [Invoke (RPC-style)](#invoke-rpc-style)
 - [Observability (optional)](#observability-optional)
+  - [How to register](#how-to-register)
+  - [`SendEvent.Operation` reference](#sendeventoperation-reference)
+  - [`ConsumeEvent` fields](#consumeevent-fields)
+  - [Example: metrics-friendly observer](#example-metrics-friendly-observer)
 - [Testing](#testing)
 - [Changelog](#changelog)
 
@@ -172,12 +176,78 @@ If you use delay messages (`StartDeliverTime`), transactional send is rejected b
 
 ## Observability (optional)
 
-Register a single process-wide **`Observer`** via **`SetObserver`** (`observer.go`):
+The library exposes **`Observer`** and **`SetObserver`** in `observer.go`. Use them to drive **Prometheus**, **OpenTelemetry**, structured logs, or tracing—**without** the library importing any of those frameworks.
 
-- **`OnSend`**: fired after producer steps such as `send_stream`, `send_delay`, and transaction phases (`txn_prepare`, `txn_exec`, `txn_commit`, …). Includes duration and error.
-- **`OnConsume`**: fired after your listener’s `Consume` returns, with **`Consume` body duration** (not including pre-consume sleep). If `Consume` panics, you get a second callback with `Panic=true` (action value is not meaningful).
+### How to register
 
-Implementations must be **non-blocking and fast**; push heavy work to your own goroutine. When no observer is set, overhead is a read lock and nil check only.
+1. Implement **`Observer`** with `OnSend` and `OnConsume`.
+2. Call **`SetObserver(yourObserver)` once** during process startup (e.g. next to where you configure logging or metrics).  
+   - You may register **before** or **after** `RegisterRedisMqConfig`; it does not use Redis.  
+   - You should register **before** `StartRedisMqConsumer` if you want the first consumed messages to be observed.  
+3. Call **`SetObserver(nil)`** to disable callbacks (e.g. in tests).
+
+`SetObserver` replaces any previous observer; only **one** observer is active at a time.
+
+### `SendEvent.Operation` reference
+
+Use `ev.Operation` as a stable label for dashboards. Typical values:
+
+| `Operation` | When it fires |
+|---------------|----------------|
+| `send_stream` | After a normal **`Send`** (`XADD` to the topic stream). `Source` is usually `ProducerWrapper`. |
+| `send_delay` | After **`SendDelay`** (ZADD to the delay queue). |
+| `txn_abort_validation` | Transaction aborted early (e.g. blank tag, or delay message not allowed). |
+| `txn_prepare` | After the transactional **prepare** step to Redis. |
+| `txn_exec` | After **your** `transactionExecuter` callback returns (check `ev.Err` and your returned status separately in app code if needed). |
+| `txn_rollback` | After rolling back the half-message when status is rollback. |
+| `txn_commit` | After committing the half-message to the stream. |
+| `txn_unknown_status` | Unknown `TransactionStatus` from the callback. |
+
+Each event includes **`Duration`** for that step, **`Success`**, and **`Err`** (may be `nil`).
+
+### `ConsumeEvent` fields
+
+| Field | Meaning |
+|-------|---------|
+| `Topic`, `Tag`, `MessageKey` | Routing identity (`MessageKey` = `topic_tag` style key used internally). |
+| `MessageId` | Redis Stream message id. |
+| `ReconsumeTimes` | Retry count **before** this delivery attempt. |
+| `Action` | What your listener returned (`CommitMessage` / `ReconsumeLater`). Meaningless when **`Panic==true`**. |
+| `Duration` | Time spent **inside** `Consume` only (excludes consumer-side sleep before `Consume`). |
+| `Panic`, `PanicValue` | Set if `Consume` panicked; you still get one `OnConsume` for the panic path. |
+
+### Example: metrics-friendly observer
+
+Keep **`OnSend` / `OnConsume` O(1)**. Record counters or push to a channel; do **not** block on network I/O here.
+
+```go
+import (
+    "context"
+    redismq "github.com/jackyang-hk/go-redismq"
+)
+
+type metricsObserver struct{}
+
+func (metricsObserver) OnSend(ctx context.Context, ev redismq.SendEvent) {
+    // Example: increment outcome by operation + success
+    // metrics.RedisMQSendTotal.WithLabelValues(ev.Operation, strconv.FormatBool(ev.Success)).Inc()
+    // metrics.RedisMQSendSeconds.WithLabelValues(ev.Operation).Observe(ev.Duration.Seconds())
+    _ = ctx
+}
+
+func (metricsObserver) OnConsume(ctx context.Context, ev redismq.ConsumeEvent) {
+    // Example: histogram of handler latency; separate label for panic
+    // metrics.RedisMQConsumeSeconds.WithLabelValues(ev.Topic, ev.Tag, strconv.FormatBool(ev.Panic)).Observe(ev.Duration.Seconds())
+    _ = ctx
+}
+
+// In main / init (before StartRedisMqConsumer if you need first messages observed):
+// redismq.SetObserver(metricsObserver{})
+```
+
+If you must do slow work, **spawn a short-lived goroutine** or hand off to a worker pool; never block the MQ hot path.
+
+When no observer is set, cost is one read lock and a nil check per callback site.
 
 ---
 
