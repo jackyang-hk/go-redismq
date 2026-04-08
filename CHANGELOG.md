@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [v1.2.3] - 2026-04-09
+
+### 稳定性
+
+- **`Observer` 回调隔离 panic**：`observeSend` / `observeConsume` 在调用 `OnSend` / `OnConsume` 时使用 `recover`，避免观测实现 panic 影响发送返回值或消费侧 ack/requeue 语义。未注册 `Observer` 时行为不变。
+
+### 升级说明
+
+- 建议业务在 `go.mod` 中依赖：`github.com/jackyang-hk/go-redismq v1.2.3`。
+
+[v1.2.3]: https://github.com/jackyang-hk/go-redismq/compare/v1.2.2...v1.2.3
+
 ## [v1.2.2] - 2026-04-09
 
 ### 可观测性（可选）

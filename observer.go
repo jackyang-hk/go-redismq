@@ -64,6 +64,9 @@ func observeSend(ctx context.Context, ev SendEvent) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	defer func() {
+		recover() // do not let Observer.OnSend panic affect producer return path
+	}()
 	o.OnSend(ctx, ev)
 }
 
@@ -75,5 +78,8 @@ func observeConsume(ctx context.Context, ev ConsumeEvent) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	defer func() {
+		recover() // do not let Observer.OnConsume panic skip ack/requeue after Consume
+	}()
 	o.OnConsume(ctx, ev)
 }
