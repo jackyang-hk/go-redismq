@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [v1.2.2] - 2026-04-09
+
+### 可观测性（可选）
+
+- 新增 **`Observer` 接口** 与 **`SetObserver`**：业务进程可注册一次回调，用于指标或日志，**不**引入 Prometheus 等硬依赖。
+- **`OnSend`**：在 `send_stream`（`Send`/`XADD`）、`send_delay`（`SendDelay`）、事务各阶段（`txn_prepare` / `txn_exec` / `txn_rollback` / `txn_commit` 等）完成后调用，含耗时与错误。
+- **`OnConsume`**：在注册的 `Consume` 返回后调用（含单次调用耗时）；若 `Consume` panic，会带 `Panic=true` 再调用一次（`Action` 在 panic 时无意义）。
+
+### 文档
+
+- 主文档 **`README.md` 改为英文**；新增 **`README.zh-CN.md`** 中文版，补充功能说明与使用结构。
+
+### 升级说明
+
+- 建议业务在 `go.mod` 中依赖：`github.com/jackyang-hk/go-redismq v1.2.2`。
+- 未注册 `Observer` 时行为与 v1.2.1 一致；注册后请注意回调内勿阻塞。
+
+[v1.2.2]: https://github.com/jackyang-hk/go-redismq/compare/v1.2.1...v1.2.2
+
 ## [v1.2.1] - 2026-03-24
 
 ### 已完成（本版本改造范围）

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/redis/go-redis/v9"
-	"strings"
 )
 
 func Send(message *Message) (bool, error) {
@@ -15,31 +17,92 @@ func Send(message *Message) (bool, error) {
 }
 func SendTransaction(message *Message, transactionExecuter func(messageToSend *Message) (TransactionStatus, error)) (bool, error) {
 	if strings.Compare(message.Tag, "blank") == 0 {
-		return false, errors.New("blank tag message")
+		err := errors.New("blank tag message")
+		observeSend(context.Background(), SendEvent{
+			Operation: "txn_abort_validation",
+			Topic:     message.Topic,
+			Tag:       message.Tag,
+			Success:   false,
+			Err:       err,
+		})
+		return false, err
 	}
 
 	if message.StartDeliverTime > 0 {
-		return false, errors.New("delay message not support transaction")
+		err := errors.New("delay message not support transaction")
+		observeSend(context.Background(), SendEvent{
+			Operation: "txn_abort_validation",
+			Topic:     message.Topic,
+			Tag:       message.Tag,
+			Success:   false,
+			Err:       err,
+		})
+		return false, err
 	}
 
+	t0 := time.Now()
 	send, err := sendTransactionPrepareMessage(message)
+	observeSend(context.Background(), SendEvent{
+		Operation: "txn_prepare",
+		Topic:     message.Topic,
+		Tag:       message.Tag,
+		Success:   err == nil && send,
+		Err:       err,
+		Duration:  time.Since(t0),
+	})
 	if err != nil || !send {
 		return send, err
 	}
+	t1 := time.Now()
 	status, err := transactionExecuter(message)
+	observeSend(context.Background(), SendEvent{
+		Operation: "txn_exec",
+		Topic:     message.Topic,
+		Tag:       message.Tag,
+		Success:   err == nil,
+		Err:       err,
+		Duration:  time.Since(t1),
+	})
 	if status == RollbackTransaction {
 		//事务执行失败，回滚半消息
+		t2 := time.Now()
 		_, rollBackErr := rollbackTransactionPrepareMessage(message)
+		observeSend(context.Background(), SendEvent{
+			Operation: "txn_rollback",
+			Topic:     message.Topic,
+			Tag:       message.Tag,
+			Success:   rollBackErr == nil,
+			Err:       rollBackErr,
+			Duration:  time.Since(t2),
+		})
 		if rollBackErr != nil {
 			fmt.Printf("rollbackTransactionPrepareMessage err:%s rollBackError:%s\n", err, rollBackErr)
 		}
 		return false, err
 	} else if status == CommitTransaction {
 		//事务执行成功，提交半消息，如提交失败，需使用 实现相应Checker 保障消息一致性 todo mark
-		return commitTransactionPrepareMessage(message)
+		t3 := time.Now()
+		ok, cerr := commitTransactionPrepareMessage(message)
+		observeSend(context.Background(), SendEvent{
+			Operation: "txn_commit",
+			Topic:     message.Topic,
+			Tag:       message.Tag,
+			Success:   cerr == nil && ok,
+			Err:       cerr,
+			Duration:  time.Since(t3),
+		})
+		return ok, cerr
 	} else {
 		//未知状态，一般在用户无法确定事务是成功还是失败时使用，对于未知状态的事务，服务端会定期进行事务回查
-		return false, errors.New("unknown transaction status")
+		err := errors.New("unknown transaction status")
+		observeSend(context.Background(), SendEvent{
+			Operation: "txn_unknown_status",
+			Topic:     message.Topic,
+			Tag:       message.Tag,
+			Success:   false,
+			Err:       err,
+		})
+		return false, err
 	}
 }
 
@@ -53,7 +116,19 @@ func sendDelayMessage(message *Message) bool {
 	return send
 }
 
-func sendMessage(message *Message, source string) (bool, error) {
+func sendMessage(message *Message, source string) (ok bool, err error) {
+	start := time.Now()
+	defer func() {
+		observeSend(context.Background(), SendEvent{
+			Operation: "send_stream",
+			Topic:     message.Topic,
+			Tag:       message.Tag,
+			Source:    source,
+			Success:   err == nil && ok,
+			Err:       err,
+			Duration:  time.Since(start),
+		})
+	}()
 	if strings.Compare(message.Tag, "blank") == 0 {
 		return false, errors.New("blank空消息")
 	}

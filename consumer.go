@@ -284,8 +284,22 @@ func runConsumeMessage(consumer IMessageListener, message *Message) {
 	}
 	go func() {
 		ctx := context.Background()
+		var consumeStart time.Time
 		defer func() {
 			if exception := recover(); exception != nil {
+				if !consumeStart.IsZero() {
+					observeConsume(ctx, ConsumeEvent{
+						Topic:          message.Topic,
+						Tag:            message.Tag,
+						MessageKey:     GetMessageKey(message.Topic, message.Tag),
+						MessageId:      message.MessageId,
+						ReconsumeTimes: message.ReconsumeTimes,
+						Action:         CommitMessage,
+						Duration:       time.Since(consumeStart),
+						Panic:          true,
+						PanicValue:     exception,
+					})
+				}
 				// todo mark print exception stack
 				fmt.Printf("RedisMQ_Receive Stream Message Error  messageKey:%s messageId:%v panic error:%s\n", GetMessageKey(message.Topic, message.Tag), message.MessageId, exception)
 				if pushTaskToResumeLater(consumer, message) {
@@ -307,7 +321,18 @@ func runConsumeMessage(consumer IMessageListener, message *Message) {
 			time.Sleep(time.Duration(1000) * time.Millisecond)
 		}
 
+		consumeStart = time.Now()
 		action := consumer.Consume(ctx, message)
+		observeConsume(ctx, ConsumeEvent{
+			Topic:          message.Topic,
+			Tag:            message.Tag,
+			MessageKey:     GetMessageKey(message.Topic, message.Tag),
+			MessageId:      message.MessageId,
+			ReconsumeTimes: message.ReconsumeTimes,
+			Action:         action,
+			Duration:       time.Since(consumeStart),
+			Panic:          false,
+		})
 		fmt.Printf("RedisMQ_Receive Stream Message Consume messageKey:%s result:%d messageId:%v cost:%dms\n", GetMessageKey(message.Topic, message.Tag), action, message.MessageId, cost)
 		if action == ReconsumeLater {
 			if pushTaskToResumeLater(consumer, message) {

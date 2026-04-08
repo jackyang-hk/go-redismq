@@ -134,7 +134,18 @@ func resolveDelayQueueDispatchDecision(removed int64, remErr error) (dispatch bo
 	return false, false, ""
 }
 
-func SendDelay(message *Message, delay int64) (bool, error) {
+func SendDelay(message *Message, delay int64) (ok bool, err error) {
+	start := time.Now()
+	defer func() {
+		observeSend(context.Background(), SendEvent{
+			Operation: "send_delay",
+			Topic:     message.Topic,
+			Tag:       message.Tag,
+			Success:   err == nil && ok,
+			Err:       err,
+			Duration:  time.Since(start),
+		})
+	}()
 	client := redis.NewClient(GetRedisConfig())
 
 	defer func(client *redis.Client) {
