@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [v1.2.5] - 2026-11-22
+
+### 稳定性
+
+- 修复消息消费、事务检查、Stream 裁剪及延迟队列轮询因反复注册 `defer` 导致的内存累积。每个后台任务现在只注册一次 panic 恢复处理。
+
+[v1.2.5]: https://github.com/jackyang-hk/go-redismq/compare/v1.2.4...v1.2.5
+
 ## [v1.2.3] - 2026-04-09
 
 ### 稳定性

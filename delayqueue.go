@@ -25,13 +25,12 @@ var (
 
 func StartDelayBackgroundThread() {
 	go func() {
+		defer func() {
+			if exception := recover(); exception != nil {
+				fmt.Printf("Redismq pollingCore panic error:%s\n", exception)
+			}
+		}()
 		for {
-			defer func() {
-				if exception := recover(); exception != nil {
-					fmt.Printf("Redismq pollingCore panic error:%s\n", exception)
-					return
-				}
-			}()
 			polling()
 			interval := DelayQueuePollInterval
 			if interval <= 0 {

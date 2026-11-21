@@ -177,19 +177,17 @@ func loopConsumer(topic string) {
 			fmt.Printf("MQStream Closs Redis Stream Client error:%s\n", err.Error())
 		}
 	}(client)
-	for {
-		var err error
-		defer func() {
-			if exception := recover(); exception != nil {
-				if v, ok := exception.(error); ok && gerror.HasStack(v) {
-					err = v
-				} else {
-					err = gerror.NewCodef(gcode.CodeInternalPanic, "%+v", exception)
-				}
-				fmt.Printf("MQStream Stream loopConsumer Redis Error topic:%s panic error:%s\n", topic, err.Error())
-				return
+	// Register recovery once for the lifetime of this consumer.
+	defer func() {
+		if exception := recover(); exception != nil {
+			err, ok := exception.(error)
+			if !ok || !gerror.HasStack(err) {
+				err = gerror.NewCodef(gcode.CodeInternalPanic, "%+v", exception)
 			}
-		}()
+			fmt.Printf("MQStream Stream loopConsumer Redis Error topic:%s panic error:%s\n", topic, err.Error())
+		}
+	}()
+	for {
 		count := 0
 		message := blockReceiveConsumerMessage(client, topic)
 		if message != nil {
@@ -210,13 +208,12 @@ func loopConsumer(topic string) {
 }
 
 func loopTransactionChecker(topic string) {
+	defer func() {
+		if exception := recover(); exception != nil {
+			fmt.Printf("RedisMQ_Query Stream Message Query Transaction Pre Redis Error loopTransactionChecker topic:%s panic error:%s\n", topic, exception)
+		}
+	}()
 	for {
-		defer func() {
-			if exception := recover(); exception != nil {
-				fmt.Printf("RedisMQ_Query Stream Message Query Transaction Pre Redis Error loopTransactionChecker topic:%s panic error:%s\n", topic, exception)
-				return
-			}
-		}()
 		messages := fetchTransactionPrepareMessagesForChecker(topic)
 		for _, message := range messages {
 			if ck := Checkers()[GetMessageKey(message.Topic, message.Tag)]; ck != nil {
@@ -550,13 +547,12 @@ func startScheduleTrimStream() {
 				fmt.Printf("MQStream redis error:%s\n", err.Error())
 			}
 		}(client)
+		defer func() {
+			if exception := recover(); exception != nil {
+				fmt.Printf("MQStream startScheduleTrimStream exception:%s\n", exception)
+			}
+		}()
 		for {
-			defer func() {
-				if exception := recover(); exception != nil {
-					fmt.Printf("MQStream startScheduleTrimStream exception:%s\n", exception)
-					return
-				}
-			}()
 			for _, topic := range Topics {
 				queueName := GetQueueName(topic)
 				client.XTrimMaxLen(context.Background(), queueName, int64(maxLen))
